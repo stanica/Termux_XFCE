@@ -3,6 +3,7 @@
 This repository provides a script to set up an XFCE desktop environment and a Debian proot installation within Termux. The setup utilizes the Termux-X11 server, which will be installed during the process. You will be prompted to allow Termux to install the corresponding Android APK.
 
 ## Key Features
+
 - **User-Friendly Setup**: Simply choose your username and follow the on-screen prompts.
 - **Storage Requirements**: Approximately 4GB of storage space is required. Note that additional applications will consume more space.
 - **Detailed Documentation**: Please review the full README for comprehensive information about this setup.
@@ -12,7 +13,7 @@ This repository provides a script to set up an XFCE desktop environment and a De
 To install, execute the following command in Termux:
 
 ```bash
-curl -sL https://raw.githubusercontent.com/phoenixbyrd/Termux_XFCE/main/install_xfce_native.sh -o install.sh && bash install.sh
+curl -sL https://raw.githubusercontent.com/stanica/Termux_XFCE/main/install_xfce_native.sh -o install.sh && bash install.sh
 ```
 
 ## Support and Community
@@ -53,11 +54,13 @@ Note: The display is pre-configured in the Debian proot environment, allowing yo
 Several aliases are provided to simplify launching applications:
 
 ### Termux XFCE:
+
 - `prun`: Execute commands from the Debian proot environment directly in the Termux terminal without entering the proot shell.
 - `zrun`: Launch applications in Debian proot with hardware acceleration.
 - `zrunhud`: Launch applications with hardware acceleration and FPS HUD.
 
 ### Debian Proot:
+
 `debian` To enter the Debian proot environment, from there, you can install additional software using `sudo apt`.
 
 ## Additional Utilities
