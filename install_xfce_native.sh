@@ -186,7 +186,7 @@ mkdir -p "$HOME/Desktop" "$HOME/Downloads" "$HOME/.fonts" "$HOME/.config" "$HOME
 #ln -s /storage/emulated/0/Pictures $HOME/Pictures
 
 # Install XFCE desktop environment
-xfce_packages=('xfce4' 'xfce4-goodies' 'xfce4-pulseaudio-plugin' 'firefox' 'starship' 'termux-x11-nightly' 'virglrenderer-android' 'mesa-vulkan-icd-freedreno-dri3' 'fastfetch' 'papirus-icon-theme' 'eza' 'bat')
+xfce_packages=('xfce4' 'xfce4-goodies' 'xfce4-pulseaudio-plugin' 'firefox' 'starship' 'termux-x11-nightly' 'mesa-vulkan-icd-freedreno-dri3' 'fastfetch' 'papirus-icon-theme' 'eza' 'bat')
 if ! pkg install -y "${xfce_packages[@]}" -o Dpkg::Options::="--force-confold"; then
     echo "Failed to install XFCE packages. Exiting."
     exit 1
@@ -677,7 +677,7 @@ sleep 3
 am start --user 0 -n com.termux.x11/com.termux.x11.MainActivity > /dev/null 2>&1
 sleep 1
 
-# Function to check the GPU type
+# Function to check the GPU type and set appropriate environment variables
 gpu_check() {
     # Attempt to detect GPU using getprop
     gpu_egl=$(getprop ro.hardware.egl)
@@ -687,11 +687,25 @@ gpu_check() {
     detected_gpu="$(echo -e "$gpu_egl\n$gpu_vulkan" | sort -u | tr '\n' ' ' | sed 's/ $//')"
 
     if echo "$detected_gpu" | grep -iq "adreno"; then
-        echo "GPU detected: $detected_gpu"
-        MESA_NO_ERROR=1 MESA_GL_VERSION_OVERRIDE=4.3COMPAT MESA_GLES_VERSION_OVERRIDE=3.2 LIBGL_DRI3_DISABLE=1 virgl_test_server_android & > /dev/null 2>&1
+        echo "GPU detected: $detected_gpu - Using Turnip+Zink"
+        # Set environment variables for Turnip+Zink but don't start virgl server
+        export MESA_NO_ERROR=1
+        export MESA_GL_VERSION_OVERRIDE=4.3COMPAT
+        export MESA_GLES_VERSION_OVERRIDE=3.2
+        export LIBGL_DRI3_DISABLE=1
+        export LIBGL_ALWAYS_SOFTWARE=0
     elif echo "$detected_gpu" | grep -iq "mali"; then
-        echo "GPU detected: $detected_gpu"
-        MESA_NO_ERROR=1 MESA_GL_VERSION_OVERRIDE=4.3COMPAT MESA_GLES_VERSION_OVERRIDE=3.2 LIBGL_DRI3_DISABLE=1 virgl_test_server_android --angle-gl & > /dev/null 2>&1
+        echo "GPU detected: $detected_gpu - Using Turnip+Zink with ANGLE"
+        # Set environment variables for Mali GPUs
+        export MESA_NO_ERROR=1
+        export MESA_GL_VERSION_OVERRIDE=4.3COMPAT
+        export MESA_GLES_VERSION_OVERRIDE=3.2
+        export LIBGL_DRI3_DISABLE=1
+        export ZINK_USE_LAVAPIPE=false
+        export LIBGL_ALWAYS_SOFTWARE=0
+        # For Mali GPUs, we might need to fall back to virgl with ANGLE
+        # Uncomment the next line if Zink doesn't work well on Mali
+        # MESA_NO_ERROR=1 MESA_GL_VERSION_OVERRIDE=4.3COMPAT MESA_GLES_VERSION_OVERRIDE=3.2 LIBGL_DRI3_DISABLE=1 virgl_test_server_android --angle-gl & > /dev/null 2>&1
     else
         echo "Unknown GPU type detected: $detected_gpu"
         exit 1
@@ -703,7 +717,7 @@ gpu_check
 
 # Run XFCE4 Desktop
 dbus-daemon --session --address=unix:path=$PREFIX/var/run/dbus-session &
-env DISPLAY=:0 GALLIUM_DRIVER=virpipe dbus-launch --exit-with-session xfce4-session & > /dev/null 2>&1
+env DISPLAY=:0 MESA_LOADER_DRIVER_OVERRIDE=zink TU_DEBUG=noconform LIBGL_ALWAYS_SOFTWARE=0 dbus-launch --exit-with-session xfce4-session & > /dev/null 2>&1
 
 exit 0
 EOF
@@ -752,7 +766,7 @@ chmod +x $PREFIX/bin/prun
 cat <<'EOF' > $PREFIX/bin/zrun
 #!/bin/bash
 varname=$(basename $PREFIX/var/lib/proot-distro/installed-rootfs/debian/home/*)
-pd login debian --user $varname --shared-tmp -- env DISPLAY=:0 MESA_LOADER_DRIVER_OVERRIDE=zink TU_DEBUG=noconform $@
+pd login debian --user $varname --shared-tmp -- env DISPLAY=:0 MESA_LOADER_DRIVER_OVERRIDE=zink TU_DEBUG=noconform LIBGL_ALWAYS_SOFTWARE=0 $@
 
 EOF
 chmod +x $PREFIX/bin/zrun
@@ -761,7 +775,7 @@ chmod +x $PREFIX/bin/zrun
 cat <<'EOF' > $PREFIX/bin/zrunhud
 #!/bin/bash
 varname=$(basename $PREFIX/var/lib/proot-distro/installed-rootfs/debian/home/*)
-pd login debian --user $varname --shared-tmp -- env DISPLAY=:0 MESA_LOADER_DRIVER_OVERRIDE=zink TU_DEBUG=noconform GALLIUM_HUD=fps $@
+pd login debian --user $varname --shared-tmp -- env DISPLAY=:0 MESA_LOADER_DRIVER_OVERRIDE=zink TU_DEBUG=noconform LIBGL_ALWAYS_SOFTWARE=0 GALLIUM_HUD=fps $@
 
 EOF
 chmod +x $PREFIX/bin/zrunhud
@@ -909,3 +923,42 @@ echo -e "${YELLOW}Installation complete! Use 'start' to launch your desktop envi
 source $PREFIX/etc/bash.bashrc
 termux-reload-settings
 rm install_xfce_native.sh
+# Create a script to switch between Zink and VirGL
+cat <<'EOF' > $PREFIX/bin/toggle-graphics
+#!/bin/bash
+
+# Check current graphics mode
+if grep -q "MESA_LOADER_DRIVER_OVERRIDE=zink" $PREFIX/bin/start; then
+    echo "Currently using Turnip+Zink. Switching to VirGL..."
+    sed -i 's/MESA_LOADER_DRIVER_OVERRIDE=zink TU_DEBUG=noconform/GALLIUM_DRIVER=virpipe/g' $PREFIX/bin/start
+    # Install virglrenderer if not already installed
+    if ! pkg list-installed | grep -q virglrenderer-android; then
+        pkg install -y virglrenderer-android
+    fi
+    echo "Switched to VirGL. Restart your session to apply changes."
+else
+    echo "Currently using VirGL. Switching to Turnip+Zink..."
+    sed -i 's/GALLIUM_DRIVER=virpipe/MESA_LOADER_DRIVER_OVERRIDE=zink TU_DEBUG=noconform/g' $PREFIX/bin/start
+    echo "Switched to Turnip+Zink. Restart your session to apply changes."
+fi
+EOF
+
+chmod +x $PREFIX/bin/toggle-graphics
+
+# Create desktop entry for graphics toggle
+cat <<EOF > $HOME/Desktop/toggle-graphics.desktop
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Toggle Graphics Mode
+Comment=Switch between Turnip+Zink and VirGL
+Exec=toggle-graphics
+Icon=preferences-desktop-display
+Categories=System;
+Path=
+StartupNotify=false
+Terminal=true
+EOF
+
+chmod +x $HOME/Desktop/toggle-graphics.desktop
+mv $HOME/Desktop/toggle-graphics.desktop $PREFIX/share/applications
